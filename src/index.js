@@ -1,28 +1,35 @@
 /**
  * @typedef {import('../types/index.js').MiddlewareOrHandler} MiddlewareOrHandler
- * @typedef {import('zod').ZodSchema} ZodSchema
  * @typedef {import('aws-lambda')} AWSLambda
  * @typedef {AWSLambda.APIGatewayEvent} APIGatewayEvent
  * @typedef {AWSLambda.Context} Context
  * @typedef {import('../types/index.js').HandlerWithMiddlewaresBuilder} HandlerWithMiddlewaresBuilder
  */
 
+import { styleText } from 'node:util';
+
+/**
+ * Envuelve una función síncrona en una promesa.
+ * @template T
+ * @param {<T>(...) => T} fn
+ * @returns {<T>(...) => Promise<T>}
+ */
+export const ensureAsync =
+	(fn) =>
+	async (...args) =>
+		Promise.resolve(fn(...args));
+
 /**
  * `createMiddleware` recibe un middleware y devuelve una función que acepta un handler.
  * Esto genera una "cadena" de ejecución entre middleware y el handler.
  * @param {MiddlewareOrHandler} middleware
- * @returns {(handler: MiddlewareOrHandler) => (event: APIGatewayEvent, context: Context) => Promise<any>}
+ * @param {MiddlewareOrHandler} handler
+ * @returns {MiddlewareOrHandler}
  */
-const createMiddleware =
-	(middleware) =>
+export const createMiddleware =
+	(middleware, handler) =>
 	/**
-	 *
-	 * @param {MiddlewareOrHandler} handler
-	 * @returns {MiddlewareOrHandler}
-	 */
-	(handler) =>
-	/**
-	 *
+	 * Ejecuta un middleware y pasa el control al siguiente en la cadena.
 	 * @param {APIGatewayEvent} event
 	 * @param {Context} context
 	 * @returns {Promise<any>}
@@ -33,34 +40,61 @@ const createMiddleware =
 		 * Esto permite al middleware decidir cuándo invocar el handler (si lo invoca).
 		 * @returns
 		 */
-		const next = async () => handler(event, context);
+		const next = async () => ensureAsync(handler)(event, context);
 
 		// Ejecuta el middleware
-		return middleware(event, context, next);
+		try {
+			return await ensureAsync(middleware)(event, context, next);
+		} catch (error) {
+			const timestamp =
+				styleText?.(['dim', 'gray'], new Date().toISOString()) ??
+				new Date().toISOString();
+			const errorText = styleText?.(['red'], 'ERROR') ?? 'ERROR';
+			console.error(`[${timestamp}] [${errorText}]`, error);
+			throw error;
+		}
 	};
 
 /**
  * `createHandler` recibe un handler y devuelve un builder con el patrón `.use`
  * para agregar middlewares y ejecutarlos dinámicamente en orden.
+ *
  * @param {MiddlewareOrHandler} handler
+ * @param {Object} [options]
+ * @param {boolean} [options.staticCompose=false] decide si se debe construir la cadena de middlewares en cada invocación o solo la primera vez que se llama a la función (por defecto `false`).
  * @returns {HandlerWithMiddlewaresBuilder}
  */
-export const createHandler = (handler) => {
-	const middlewares = [];
+export const createHandler = (
+	handler,
+	{ staticCompose } = { staticCompose: false }
+) => {
+	/**
+	 * Almacena los middlewares que se van agregando.
+	 * @type {MiddlewareOrHandler[]}
+	 */
+	const middlewareChain = [];
+	/**
+	 * Handler envuelto con los middlewares.
+	 * @type {MiddlewareOrHandler}
+	 */
+	let composedHandler = null;
 
 	/**
-	 * Manejador final que construye dinámicamente la cadena de middlewares
-	 * y ejecuta el handler.
+	 * Manejador final que construye dinámicamente la cadena de middlewares y ejecuta el handler resultante.
+	 *
+	 * La construcción de la cadena de middlewares se realizará dinámicamente en cada invocación o una sola vez en funcion de `staticCompose`.
 	 * @param {APIGatewayEvent} event
 	 * @param {Context} context
 	 * @returns {Promise<any>}
 	 */
 	const finalHandler = async (event, context) => {
-		// Construir la cadena de middlewares dinámicamente en cada invocación
-		const composedHandler = middlewares.reduce(
-			(wrapped, middleware) => createMiddleware(middleware)(wrapped),
-			handler
-		);
+		if (!composedHandler || !staticCompose) {
+			composedHandler = middlewareChain.reduce(
+				(wrappedHandler, nextMiddleware) =>
+					createMiddleware(nextMiddleware, wrappedHandler),
+				handler
+			);
+		}
 
 		return composedHandler(event, context);
 	};
@@ -71,7 +105,13 @@ export const createHandler = (handler) => {
 	 * @returns {HandlerWithMiddlewaresBuilder}
 	 */
 	const addMiddleware = (middleware) => {
-		middlewares.push(middleware);
+		if (typeof middleware !== 'function')
+			throw new TypeError('El parametro `middleware` debe ser una función.');
+
+		if (staticCompose && composedHandler)
+			throw new Error('Cannot add middleware after handler has been invoked.');
+
+		middlewareChain.push(middleware);
 		return finalHandler; // Permite encadenar `.use`
 	};
 
@@ -79,33 +119,4 @@ export const createHandler = (handler) => {
 	finalHandler.use = addMiddleware;
 
 	return finalHandler;
-};
-
-/**
- *
- * @param {Parameters<MiddlewareOrHandler>[0]} event
- * @param {Parameters<MiddlewareOrHandler>[1]} context
- * @param {Parameters<MiddlewareOrHandler>[2]} next
- * @returns
- */
-export const logMiddleware = async (event, context, next) => {
-	const { httpMethod, path, body, queryStringParameters } = event;
-	const { functionName, awsRequestId } = context;
-	const logMessage = `[${httpMethod}] [${path}] [${new Date().toISOString()}] [${awsRequestId}]`;
-
-	let parsedBody;
-	try {
-		parsedBody = body ? JSON.parse(body) : null;
-	} catch (e) {
-		console.error('Error parsing body:', e);
-		parsedBody = null;
-	}
-
-	console.log(`[LogMiddleware: ${functionName}] ${logMessage}`, {
-		body: parsedBody,
-		queryStringParameters,
-	});
-	const result = await next();
-	console.log(`[LogMiddleware: ${functionName}] ${logMessage}`, { result });
-	return result;
 };
