@@ -8,7 +8,7 @@
 export type MiddlewareOrHandler<T = unknown, U = unknown> = (
 	event: import('aws-lambda').APIGatewayProxyEvent,
 	context: import('aws-lambda').Context,
-	next?: () => Promise<U>
+	next?: () => U
 ) => Promise<T>;
 
 /**
@@ -23,3 +23,20 @@ export type HandlerWithMiddlewaresBuilder<
 		middleware: MiddlewareOrHandler<any, any>
 	) => HandlerWithMiddlewaresBuilder<T, U>;
 };
+
+/**
+ * Una función síncrona cualquiera.
+ */
+export declare type AnySyncFn<T = unknown> = (...args: any[]) => T;
+
+/**
+ * Una función asíncrona cualquiera.
+ */
+export declare type AnyAsyncFn<T = unknown> = (...args: any[]) => Promise<T>;
+
+/**
+ * Envuelve una función síncrona cualquiera en una promesa para convertirla en asíncrona.
+ */
+export declare type EnsureAsyncFn<T = unknown> = (
+	syncFn: AnySyncFn<T>
+) => AnyAsyncFn<T>;

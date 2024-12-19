@@ -1,4 +1,6 @@
 /**
+ * @typedef {import('../types/index.js').AnySyncFn} AnySyncFn
+ * @typedef {import('../types/index.js').AnyAsyncFn} AnyAsyncFn
  * @typedef {import('../types/index.js').MiddlewareOrHandler} MiddlewareOrHandler
  * @typedef {import('aws-lambda')} AWSLambda
  * @typedef {AWSLambda.APIGatewayEvent} APIGatewayEvent
@@ -10,9 +12,8 @@ import { styleText } from 'node:util';
 
 /**
  * Envuelve una función síncrona en una promesa.
- * @template T
- * @param {<T>(...) => T} fn
- * @returns {<T>(...) => Promise<T>}
+ * @param {AnySyncFn} fn
+ * @returns {AnyAsyncFn}
  */
 export const ensureAsync =
 	(fn) =>
@@ -20,8 +21,8 @@ export const ensureAsync =
 		Promise.resolve(fn(...args));
 
 /**
- * `createMiddleware` recibe un middleware y devuelve una función que acepta un handler.
- * Esto genera una "cadena" de ejecución entre middleware y el handler.
+ * `createMiddleware` recibe un _middleware_ y devuelve una función que acepta un _handler_.
+ * Esto genera una "cadena" de ejecución entre _middleware_ y el _handler_.
  * @param {MiddlewareOrHandler} middleware
  * @param {MiddlewareOrHandler} handler
  * @returns {MiddlewareOrHandler}
@@ -29,16 +30,15 @@ export const ensureAsync =
 export const createMiddleware =
 	(middleware, handler) =>
 	/**
-	 * Ejecuta un middleware y pasa el control al siguiente en la cadena.
+	 * Ejecuta un _middleware_ y pasa el control al siguiente en la cadena.
 	 * @param {APIGatewayEvent} event
 	 * @param {Context} context
 	 * @returns {Promise<any>}
 	 */
 	async (event, context) => {
 		/**
-		 * Dentro de la función retornada, el handler original se define como next.
-		 * Esto permite al middleware decidir cuándo invocar el handler (si lo invoca).
-		 * @returns
+		 * Dentro de la función retornada, el _handler_ original se define como `next`.
+		 * Esto permite al _middleware_ decidir cuándo invocar el _handler_ (si lo invoca).
 		 */
 		const next = async () => ensureAsync(handler)(event, context);
 
@@ -56,8 +56,8 @@ export const createMiddleware =
 	};
 
 /**
- * `createHandler` recibe un handler y devuelve un builder con el patrón `.use`
- * para agregar middlewares y ejecutarlos dinámicamente en orden.
+ * `createHandler` recibe un _handler_ y devuelve un _builder_ con el patrón `.use`
+ * para agregar _middlewares_ y ejecutarlos dinámicamente en orden.
  *
  * @param {MiddlewareOrHandler} handler
  * @param {Object} [options]
@@ -69,20 +69,20 @@ export const createHandler = (
 	{ staticCompose } = { staticCompose: false }
 ) => {
 	/**
-	 * Almacena los middlewares que se van agregando.
+	 * Almacena los _middlewares_ que se van agregando.
 	 * @type {MiddlewareOrHandler[]}
 	 */
 	const middlewareChain = [];
 	/**
-	 * Handler envuelto con los middlewares.
+	 * _Handler_ envuelto con los _middlewares_.
 	 * @type {MiddlewareOrHandler}
 	 */
 	let composedHandler = null;
 
 	/**
-	 * Manejador final que construye dinámicamente la cadena de middlewares y ejecuta el handler resultante.
+	 * Manejador final que construye dinámicamente la cadena de _middlewares_ y ejecuta el _handler_ resultante.
 	 *
-	 * La construcción de la cadena de middlewares se realizará dinámicamente en cada invocación o una sola vez en funcion de `staticCompose`.
+	 * La construcción de la cadena de _middlewares_ se realizará dinámicamente en cada invocación o una sola vez en funcion de `staticCompose`.
 	 * @param {APIGatewayEvent} event
 	 * @param {Context} context
 	 * @returns {Promise<any>}
@@ -100,7 +100,7 @@ export const createHandler = (
 	};
 
 	/**
-	 * Implementa patrón builder para agregar middlewares
+	 * Implementa patrón _builder_ para agregar _middlewares_
 	 * @param {MiddlewareOrHandler} middleware
 	 * @returns {HandlerWithMiddlewaresBuilder}
 	 */
@@ -109,7 +109,9 @@ export const createHandler = (
 			throw new TypeError('El parametro `middleware` debe ser una función.');
 
 		if (staticCompose && composedHandler)
-			throw new Error('Cannot add middleware after handler has been invoked.');
+			throw new Error(
+				'Cannot add middleware after handler has been invoked when `staticCompose` is `true`.'
+			);
 
 		middlewareChain.push(middleware);
 		return finalHandler; // Permite encadenar `.use`
