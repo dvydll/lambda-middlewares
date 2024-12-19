@@ -7,7 +7,7 @@ import { ZodError } from 'zod';
 import { badRequest, internalServerError } from '../net/response.js';
 
 /**
- * Middleware para validar el payload de la solicitud utilizando un esquema Zod
+ * _Middleware_ para validar el _payload_ de la solicitud utilizando un esquema Zod
  * @param {ZodSchema} schema
  * @returns {MiddlewareOrHandler}
  */
@@ -15,7 +15,13 @@ export const zodValidationMiddleware =
 	(schema) => async (event, context, next) => {
 		try {
 			const { queryStringParameters, body } = event;
-			const parsedBody = body && JSON.parse(body);
+			let parsedBody;
+			try {
+				parsedBody = JSON.parse(body || '{}');
+			} catch (error) {
+				console.warn('[ValidationMiddleware]', error);
+				parsedBody = null;
+			}
 			const validatedPayload = schema.parse({
 				...(body && { body: parsedBody }),
 				...(queryStringParameters && { queryStringParameters }),
@@ -27,14 +33,19 @@ export const zodValidationMiddleware =
 			console.error('[ValidationMiddleware]', error);
 			if (error instanceof ZodError) {
 				return badRequest({
-					errors: error.issues.map(({ path, message }) => ({ path, message })),
+					message: error.message || 'Invalid payload',
+					details: {
+						issues: error.issues.map(({ path, message }) => ({
+							message,
+							path,
+						})),
+					},
 					awsRequestId: context.awsRequestId,
 				});
 			}
 			return internalServerError({
-				errors: [
-					{ path: 'unknown', message: error.message || 'Unknown error' },
-				],
+				message: error.message || 'Unknown error',
+				details: error,
 				awsRequestId: context.awsRequestId,
 			});
 		}
